@@ -921,26 +921,21 @@ class _MaskedUnaryOperation(_MaskedUFunc):
 
         """
         d = getdata(a)
+        m = getmask(a)
         # Deal with domain
         if self.domain is not None:
-            # Case 1.1. : Domained function
-            # nans at masked positions cause RuntimeWarnings, even though
-            # they are masked. To avoid this we suppress warnings.
-            with np.errstate(divide='ignore', invalid='ignore'):
-                result = self.f(d, *args, **kwargs)
-            # Make a mask
-            m = ~umath.isfinite(result)
+            # For domained function, set a corresponding mask.
             m |= self.domain(d)
-            m |= getmask(a)
-        else:
-            # Case 1.2. : Function without a domain
-            # Get the result and the mask
-            with np.errstate(divide='ignore', invalid='ignore'):
-                result = self.f(d, *args, **kwargs)
-            m = getmask(a)
+
+        # nans at masked positions cause RuntimeWarnings, even though
+        # they are masked. To avoid this we suppress warnings.
+        with np.errstate(divide='ignore', invalid='ignore'):
+            result = self.f(d, *args, **kwargs)
+        # Mask also any non-finite numbers not captured by the domain.
+        m |= ~umath.isfinite(result)
 
         if not result.ndim:
-            # Case 2.1. : The result is scalarscalar
+            # Case 2.1. : The result is scalar
             if m:
                 return masked
             return result
@@ -957,11 +952,14 @@ class _MaskedUnaryOperation(_MaskedUFunc):
                 np.copyto(result, d, where=m)
             except TypeError:
                 pass
-        # Transform to
-        masked_result = result.view(get_masked_subclass(a))
-        masked_result._mask = m
-        masked_result._update_from(a)
-        return masked_result
+        # Transform to the masked subclass if necessary. Note that `result`
+        # can be a MaskedArray already if an `out` argument was given.
+        subclass = get_masked_subclass(a)
+        if not isinstance(result, subclass):
+            result = result.view(subclass)
+        result._mask = m
+        result._update_from(a)
+        return result
 
 
 class _MaskedBinaryOperation(_MaskedUFunc):
@@ -974,9 +972,6 @@ class _MaskedBinaryOperation(_MaskedUFunc):
     mbfunc : function
         The function for which to define a masked version. Made available
         as ``_MaskedBinaryOperation.f``.
-    domain : class instance
-        Default domain for the function. Should be one of the ``_Domain*``
-        classes. Default is None.
     fillx : scalar, optional
         Filling value for the first argument, default is 0.
     filly : scalar, optional
@@ -1004,12 +999,12 @@ class _MaskedBinaryOperation(_MaskedUFunc):
         """
         # Get the data, as ndarray
         (da, db) = (getdata(a), getdata(b))
+        # Get the masks
+        (ma, mb) = (getmask(a), getmask(b))
         # Get the result
         with np.errstate():
             np.seterr(divide='ignore', invalid='ignore')
             result = self.f(da, db, *args, **kwargs)
-        # Get the mask for the result
-        (ma, mb) = (getmask(a), getmask(b))
         if ma is nomask:
             if mb is nomask:
                 m = nomask
@@ -1035,14 +1030,17 @@ class _MaskedBinaryOperation(_MaskedUFunc):
             except Exception:
                 pass
 
-        # Transforms to a (subclass of) MaskedArray
-        masked_result = result.view(get_masked_subclass(a, b))
-        masked_result._mask = m
+        # Transform to the masked subclass if necessary. Note that `result`
+        # can be a MaskedArray already if an `out` argument was given.
+        subclass = get_masked_subclass(a, b)
+        if not isinstance(result, subclass):
+            result = result.view(subclass)
+        result._mask = m
         if isinstance(a, MaskedArray):
-            masked_result._update_from(a)
+            result._update_from(a)
         elif isinstance(b, MaskedArray):
-            masked_result._update_from(b)
-        return masked_result
+            result._update_from(b)
+        return result
 
     def reduce(self, target, axis=0, dtype=None):
         """
@@ -1148,17 +1146,17 @@ class _DomainedBinaryOperation(_MaskedUFunc):
         "Execute the call behavior."
         # Get the data
         (da, db) = (getdata(a), getdata(b))
+        # Set up the default mask, from the original masks and the domain
+        m = getmask(a) | getmask(b)
+        domain = ufunc_domain.get(self.f, None)
+        if domain is not None:
+            # cannot do it inplace, to avoid broadcasting problems.
+            m = m | domain(da, db)
         # Get the result
         with np.errstate(divide='ignore', invalid='ignore'):
             result = self.f(da, db, *args, **kwargs)
-        # Get the mask as a combination of the source masks and invalid
-        m = ~umath.isfinite(result)
-        m |= getmask(a)
-        m |= getmask(b)
-        # Apply the domain
-        domain = ufunc_domain.get(self.f, None)
-        if domain is not None:
-            m |= domain(da, db)
+        # Also mask any invalid data not captured by the domain.
+        m |= ~umath.isfinite(result)
         # Take care of the scalar case first
         if (not m.ndim):
             if m:
@@ -1177,14 +1175,17 @@ class _DomainedBinaryOperation(_MaskedUFunc):
         except Exception:
             pass
 
-        # Transforms to a (subclass of) MaskedArray
-        masked_result = result.view(get_masked_subclass(a, b))
-        masked_result._mask = m
+        # Transform to the masked subclass if necessary. Note that `result`
+        # can be a MaskedArray already if an `out` argument was given.
+        subclass = get_masked_subclass(a, b)
+        if not isinstance(result, subclass):
+            result = result.view(subclass)
+        result._mask = m
         if isinstance(a, MaskedArray):
-            masked_result._update_from(a)
+            result._update_from(a)
         elif isinstance(b, MaskedArray):
-            masked_result._update_from(b)
-        return masked_result
+            result._update_from(b)
+        return result
 
 
 # Unary ufuncs
@@ -1613,7 +1614,7 @@ def make_mask(m, copy=False, shrink=True, dtype=MaskType):
 
     # Make sure the input dtype is valid.
     dtype = make_mask_descr(dtype)
-    
+
     # legacy boolean special case: "existence of fields implies true"
     if isinstance(m, ndarray) and m.dtype.fields and dtype == np.bool_:
         return np.ones(m.shape, dtype=dtype)
@@ -2984,6 +2985,33 @@ class MaskedArray(ndarray):
                 self._fill_value = _check_fill_value(None, self.dtype)
         return
 
+    def __array_prepare__(self, obj, context=None):
+        """
+        Special hook for ufuncs.
+
+        Wraps the numpy array and pre-sets the mask according to context.
+
+        """
+        if obj is self:  # for in-place operations
+            result = obj
+        else:
+            result = obj.view(type(self))
+            result._update_from(self)
+
+        if context is not None:
+            (func, args, _) = context
+            # Get the domain mask
+            domain = ufunc_domain.get(func, None)
+            if domain is not None:
+                # Take the domain, and make sure it's a ndarray
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    d = filled(domain(*args[:func.nin]), True)
+                # We temporarily store it on the result, since we cannot
+                # use it yet.
+                result._d = d
+
+        return result
+
     def __array_wrap__(self, obj, context=None):
         """
         Special hook for ufuncs.
@@ -2994,24 +3022,21 @@ class MaskedArray(ndarray):
         if obj is self:  # for in-place operations
             result = obj
         else:
-            result = obj.view(type(self))
-            result._update_from(self)
+            if isinstance(obj, type(self)):
+                result = obj
+            else:
+                # For cases where we have not passed through __array_prepare__
+                result = obj.view(type(self))
+                result._update_from(self)
 
         if context is not None:
             result._mask = result._mask.copy()
             (func, args, _) = context
             m = reduce(mask_or, [getmaskarray(arg) for arg in args])
-            # Get the domain mask
-            domain = ufunc_domain.get(func, None)
-            if domain is not None:
-                # Take the domain, and make sure it's a ndarray
-                if len(args) > 2:
-                    with np.errstate(divide='ignore', invalid='ignore'):
-                        d = filled(reduce(domain, args), True)
-                else:
-                    with np.errstate(divide='ignore', invalid='ignore'):
-                        d = filled(domain(*args), True)
-
+            # Get the pre-calculated domain mask
+            if hasattr(result, '_d'):
+                d = result._d
+                del result._d
                 if d.any():
                     # Fill the result where the domain is wrong
                     try:
