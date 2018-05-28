@@ -342,6 +342,13 @@ class TestUfunc(object):
         assert_equal(flags, (1, 0, 1))
         assert_equal(sizes, (3, -1, 9))
 
+        enabled, num_dims, ixs, flags, sizes = umt.test_signature(3, 1, "(3),(03,3),(n)->(9)")
+        assert_equal(enabled, 1)
+        assert_equal(num_dims, (1, 2, 1, 1))
+        assert_equal(ixs, (0, 0, 0, 1, 2))
+        assert_equal(flags, (1, 0, 1))
+        assert_equal(sizes, (3, -1, 9))
+
         enabled, num_dims, ixs, flags, sizes = umt.test_signature(3, 1, "(3?),(3?,3?),(n)->(9)")
         assert_equal(enabled, 1)
         assert_equal(num_dims, (1, 2, 1, 1))
