@@ -2200,19 +2200,20 @@ _parse_axes_arg(PyUFuncObject *ufunc, int core_num_dims[], PyObject *axes,
  *
  * Returns 0 on success, and -1 on failure
  *
- * The behavior has been changed in NumPy 1.10.0, and the following
+ * The behavior has been changed in NumPy 1.16.0, and the following
  * requirements must be fulfilled or an error will be raised:
  *  * Arguments, both input and output, must have at least as many
  *    dimensions as the corresponding number of core dimensions. In
- *    previous versions, 1's were prepended to the shape as needed.
+ *    versions before 1.10, 1's were prepended to the shape as needed.
  *  * Core dimensions with same labels must have exactly matching sizes.
- *    In previous versions, core dimensions of size 1 would broadcast
+ *    In versions before 1.10, core dimensions of size 1 would broadcast
  *    against other core dimensions with the same label.
  *  * All core dimensions must have their size specified by a passed in
- *    input or output argument. In previous versions, core dimensions in
+ *    input or output argument. In versions before 1.10, core dimensions in
  *    an output argument that were not specified in an input argument,
  *    and whose size could not be inferred from a passed in output
  *    argument, would have their size set to 1.
+ *  * Core dimensions may be fixed, new in ufunc->version 1 (NumPy 1.16)
  */
 static int
 _get_coredim_sizes(PyUFuncObject *ufunc, PyArrayObject **op,
@@ -2223,9 +2224,16 @@ _get_coredim_sizes(PyUFuncObject *ufunc, PyArrayObject **op,
     int nout = ufunc->nout;
     int nop = nin + nout;
 
-    for (j = 0; j < ufunc->core_num_dim_ix; ++j) {
-        /* support fixed-size dim names */
-        core_dim_sizes[j] = ufunc->core_dim_sizes[j];
+    if (ufunc->version > 0) {
+        for (j = 0; j < ufunc->core_num_dim_ix; ++j) {
+            /* support fixed-size dim names */
+            core_dim_sizes[j] = ufunc->core_dim_sizes[j];
+        }
+    }
+    else {
+        for (j = 0; j < ufunc->core_num_dim_ix; ++j) {
+            core_dim_sizes[j] = UFUNC_CORE_DIM_SIZE_UNSET;
+        }
     }
     for (i = 0; i < nop; ++i) {
         if (op[i] != NULL) {
@@ -2421,9 +2429,17 @@ PyUFunc_GeneralizedFunction(PyUFuncObject *ufunc,
         dtypes[i] = NULL;
         arr_prep[i] = NULL;
     }
+
     /* copy per-argument flags, so they can be changed */
-    for (idim = 0; idim < ufunc->core_num_dim_ix; ++idim) {
-        core_dim_flags[idim] = ufunc->core_dim_flags[idim];
+    if (ufunc->version > 0) {
+        for (idim = 0; idim < ufunc->core_num_dim_ix; ++idim) {
+            core_dim_flags[idim] = ufunc->core_dim_flags[idim];
+        }
+    }
+    else {
+        for (idim = 0; idim < ufunc->core_num_dim_ix; ++idim) {
+            core_dim_flags[idim] = 0;
+        }
     }
 
     NPY_UF_DBG_PRINT("Getting arguments\n");
