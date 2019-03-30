@@ -315,15 +315,15 @@ static void
     npy_intp is1=steps[0];
     BEGIN_OUTER_LOOP_2
         char *ip1=args[0], *op=args[1];
-        @typ@ mu = 0;
+        @typ@ X = *(@typ@ *)ip1;
         @typ@ S = 0;
-        @typ@ dx, dmu;
-        for (i = 0; i < di; i++) {
-            dx = (*(@typ@ *)ip1) - mu;
-            dmu = dx / (1 + i);
-            mu += dmu;
-            S += dx * (dx - dmu);
-            ip1 += is1;
+        @typ@ dX;
+        ip1 += is1;
+        for (i = 2; i <= di; i++, ip1 += is1) {
+            const @typ@ x = *(@typ@ *)ip1;
+            X += x;
+            dX = X - i * x;
+            S += (dX * dX) / (i * (i - 1));
         }
         *(@typ@ *)op = S / di;
     END_OUTER_LOOP
