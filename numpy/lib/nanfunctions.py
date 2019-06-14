@@ -59,8 +59,7 @@ def _nan_mask(a, out=None):
         is such that it can't possibly contain ``np.nan``, returns ``True``.
     """
     # we assume that a is an array for this private function
-
-    if a.dtype.kind not in 'fc':
+    if hasattr(a, 'dtype') and a.dtype.kind not in 'fc':
         return True
 
     y = np.isnan(a, out=out)
@@ -557,7 +556,7 @@ def _nansum_dispatcher(a, axis=None, dtype=None, out=None, keepdims=None):
 
 
 @array_function_dispatch(_nansum_dispatcher)
-def nansum(a, axis=None, dtype=None, out=None, keepdims=np._NoValue):
+def nansum(a, axis=None, dtype=None, out=None, keepdims=False):
     """
     Return the sum of array elements over a given axis treating Not a
     Numbers (NaNs) as zero.
@@ -646,15 +645,8 @@ def nansum(a, axis=None, dtype=None, out=None, keepdims=np._NoValue):
     nan
 
     """
-    try:
-        a = np.asanyarray(a)
-        return np.sum(a, axis=axis, dtype=dtype, out=out, keepdims=keepdims,
-                      where=_nan_mask(a))
-    except TypeError:
-        # retain old mask handling for np.matrix,
-        # which does not support where kwarg
-        a, mask = _replace_nan(a, 0)
-        return np.sum(a, axis=axis, dtype=dtype, out=out, keepdims=keepdims)
+    return np.add.reduce(a, axis=axis, dtype=dtype, out=out, keepdims=keepdims,
+                         where=_nan_mask(a))
 
 
 def _nanprod_dispatcher(a, axis=None, dtype=None, out=None, keepdims=None):
