@@ -10,7 +10,7 @@ from numpy._core._multiarray_umath import _array_converter
 from numpy._core.multiarray import add_docstring
 
 from . import numeric as _nx
-from .numeric import asanyarray, nan, ndim, result_type
+from .numeric import asanyarray, nan, result_type
 
 __all__ = ['logspace', 'linspace', 'geomspace']
 
